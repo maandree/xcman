@@ -141,11 +141,11 @@ make_root_tile(void)
 	unsigned char *prop;
 	int fill;
 	XRenderPictureAttributes pa;
-	int p;
+	int i;
 
 	pixmap = None;
-	for (p = 0; background_properties[p]; p++) {
-		if (!XGetWindowProperty(dpy, root, XInternAtom(dpy, background_properties[p], 0), 0, 4, 0, AnyPropertyType,
+	for (i = 0; background_properties[i]; i++) {
+		if (!XGetWindowProperty(dpy, root, XInternAtom(dpy, background_properties[i], 0), 0, 4, 0, AnyPropertyType,
 				        &actual_type, &actual_format, &nitems, &bytes_after, &prop) &&
 		    actual_type == XInternAtom(dpy, "PIXMAP", 0) && actual_format == 32 && nitems == 1) {
 			memcpy(&pixmap, prop, 4);
@@ -167,16 +167,8 @@ make_root_tile(void)
 	return picture;
 }
 
-static void
-paint_root(void)
-{
-	if (!root_tile)
-		root_tile = make_root_tile();
-	XRenderComposite(dpy, PictOpSrc, root_tile, None, root_buffer, 0, 0, 0, 0, 0, 0, root_width, root_height);
-}
-
 static XserverRegion
-win_extents(struct window *w)
+window_extents(struct window *w)
 {
 	XRectangle r;
 	COPY_AREA(&r, &w->a);
@@ -252,7 +244,7 @@ paint_all(XserverRegion region)
 		if (!w->border_size)
 			w->border_size = border_size(w);
 		if (!w->extents)
-			w->extents = win_extents(w);
+			w->extents = window_extents(w);
 		if (w->solid) {
 			x = w->a.x;
 			y = w->a.y;
@@ -273,7 +265,9 @@ paint_all(XserverRegion region)
 		t = w;
 	}
 	XFixesSetPictureClipRegion(dpy, root_buffer, 0, 0, region);
-	paint_root();
+	if (!root_tile)
+		root_tile = make_root_tile();
+	XRenderComposite(dpy, PictOpSrc, root_tile, None, root_buffer, 0, 0, 0, 0, 0, 0, root_width, root_height);
 	for (w = t; w; w = w->prev_trans) {
 		XFixesSetPictureClipRegion(dpy, root_buffer, 0, 0, w->border_clip);
 		if (w->opacity != OPAQUE && !w->alpha_picture)
@@ -497,7 +491,7 @@ configure_window(XConfigureEvent *ce)
 	w->a.override_redirect = ce->override_redirect;
 	restack_window(w, ce->above);
 	if (damage) {
-		extents = win_extents(w);
+		extents = window_extents(w);
 		XFixesUnionRegion(dpy, damage, damage, extents);
 		XFixesDestroyRegion(dpy, extents);
 		add_damage(damage);
@@ -561,7 +555,7 @@ damage_window(XDamageNotifyEvent *de)
 	if (!w)
 		return;
 	if (!w->damaged) {
-		parts = win_extents(w);
+		parts = window_extents(w);
 		set_ignore(NextRequest(dpy));
 		XDamageSubtract(dpy, w->damage, None, None);
 	} else {
@@ -677,7 +671,7 @@ register_composite_manager(void)
 	}
 
 	w = XCreateSimpleWindow(dpy, RootWindow(dpy, screen), 0, 0, 1, 1, 0, None, None);
-	Xutf8SetWMProperties(dpy, w, "xcompmgr", "xcompmgr", NULL, 0, NULL, NULL, NULL);
+	Xutf8SetWMProperties(dpy, w, "xcman", "xcman", NULL, 0, NULL, NULL, NULL);
 	XSetSelectionOwner(dpy, a, w, 0);
 }
 
