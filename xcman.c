@@ -49,11 +49,13 @@ static size_t n_ignores = 0, size_ignores = 0;
 static Display *dpy;
 static int screen;
 static Window root;
+static XRenderPictFormat *visual_format;
 static int root_height, root_width;
 static int damage_error, xfixes_error, render_error;
 static int damage_event, xshape_event;
 static int composite_opcode;
-static Atom opacity_atom;
+static Atom opacity_atom, background_atom1, background_atom2, pixmap_atom;
+static Atom *background_atoms[] = {&background_atom1, &background_atom2};
 static XRenderColor alpha_colour = {.red = 0, .green = 0, .blue = 0};
 
 static struct window *window_list;
@@ -62,8 +64,6 @@ static Picture root_buffer;
 static Picture root_tile;
 static XserverRegion all_damage;
 static int clip_changed;
-
-static const char *background_properties[] = {"_XROOTPMAP_ID", "_XSETROOT_ID", NULL};
 
 static void
 usage(const char *program)
@@ -132,22 +132,18 @@ find_window(Window id)
 static Picture
 make_root_tile(void)
 {
-	Picture picture;
+	Picture picture, pixmap;
 	Atom actual_type;
-	Pixmap pixmap;
-	int actual_format;
-	unsigned long int nitems;
-	unsigned long int bytes_after;
+	int i, actual_format, fill;
+	unsigned long int nitems, bytes_after;
 	unsigned char *prop;
-	int fill;
 	XRenderPictureAttributes pa;
-	int i;
 
 	pixmap = None;
-	for (i = 0; background_properties[i]; i++) {
-		if (!XGetWindowProperty(dpy, root, XInternAtom(dpy, background_properties[i], 0), 0, 4, 0, AnyPropertyType,
+	for (i = 0; i < 2; i++) {
+		if (!XGetWindowProperty(dpy, root, *(background_atoms[i]), 0, 4, 0, AnyPropertyType,
 				        &actual_type, &actual_format, &nitems, &bytes_after, &prop) &&
-		    actual_type == XInternAtom(dpy, "PIXMAP", 0) && actual_format == 32 && nitems == 1) {
+		    actual_type == pixmap_atom && actual_format == 32 && nitems == 1) {
 			memcpy(&pixmap, prop, 4);
 			XFree(prop);
 			fill = 0;
@@ -159,7 +155,7 @@ make_root_tile(void)
 		fill = 1;
 	}
 	pa.repeat = 1;
-	picture = XRenderCreatePicture(dpy, pixmap, XRenderFindVisualFormat(dpy, DefaultVisual(dpy, screen)), CPRepeat, &pa);
+	picture = XRenderCreatePicture(dpy, pixmap, visual_format, CPRepeat, &pa);
 	if (fill) {
 		alpha_colour.alpha = 0xFFFF;
 		XRenderFillRectangle(dpy, PictOpSrc, picture, &alpha_colour, 0, 0, 1, 1);
@@ -207,7 +203,7 @@ paint_all(XserverRegion region)
 	}
 	if (!root_buffer) {
 		rootPixmap = XCreatePixmap(dpy, root, root_width, root_height, DefaultDepth(dpy, screen));
-		root_buffer = XRenderCreatePicture(dpy, rootPixmap, XRenderFindVisualFormat(dpy, DefaultVisual(dpy, screen)), 0, NULL);
+		root_buffer = XRenderCreatePicture(dpy, rootPixmap, visual_format, 0, NULL);
 		XFreePixmap(dpy, rootPixmap);
 	}
 	XFixesSetPictureClipRegion(dpy, root_picture, 0, 0, region);
@@ -312,7 +308,7 @@ get_opacity_prop(struct window *w, unsigned int def)
 	int err = XGetWindowProperty(dpy, w->id, opacity_atom, 0L, 1L, 0, XA_CARDINAL, &actual, &format, &n, &left, &data);
 	if (!err && data) {
 		i = *(uint32_t *)data;
-		XFree((void *)data);
+		XFree(data);
 		return i;
 	}
 	return def;
@@ -323,18 +319,14 @@ determine_mode(struct window *w)
 {
 	XRenderPictFormat *format;
 	XserverRegion damage;
-
 	if (w->alpha_picture) {
 		XRenderFreePicture(dpy, w->alpha_picture);
 		w->alpha_picture = None;
 	}
-
 	w->opacity = get_opacity_prop(w, OPAQUE);
-
 	w->solid = (w->opacity == OPAQUE &&
 		    ((format = w->a.class == InputOnly ? NULL : XRenderFindVisualFormat(dpy, w->a.visual)),
 		     (!format || format->type != PictTypeDirect || !format->direct.alphaMask)));
-
 	if (w->extents) {
 		damage = XFixesCreateRegion(dpy, NULL, 0);
 		XFixesCopyRegion(dpy, damage, w->extents);
@@ -348,15 +340,9 @@ map_window(Window id)
 	struct window *w = find_window(id);
 	if (!w)
 		return;
-
 	w->a.map_state = IsViewable;
-
-	/* This needs to be here or else we lose transparency messages */
-	XSelectInput(dpy, id, PropertyChangeMask);
-
-	/* This needs to be here since we don't get PropertyNotify when unmapped */
-	determine_mode(w);
-
+	XSelectInput(dpy, id, PropertyChangeMask); /* This needs to be here or else we lose transparency messages */
+	determine_mode(w); /* This needs to be here since we don't get PropertyNotify when unmapped */
 	w->damaged = 0;
 }
 
@@ -364,16 +350,14 @@ static void
 finish_unmap_window(struct window *w)
 {
 	w->damaged = 0;
-	if (w->extents != None) {
+	if (w->extents) {
 		add_damage(w->extents); /* destroys region */
 		w->extents = None;
 	}
-
 	if (w->pixmap) {
 		XFreePixmap(dpy, w->pixmap);
 		w->pixmap = None;
 	}
-
 	if (w->picture) {
 		set_ignore(NextRequest(dpy));
 		XRenderFreePicture(dpy, w->picture);
@@ -432,10 +416,8 @@ add_window(Window id)
 static void
 restack_window(struct window *w, Window new_above)
 {
-	Window old_above;
 	struct window **prev;
-
-	old_above = w->next ? w->next->id : None;
+	Window old_above = w->next ? w->next->id : None;
 
 	if (old_above != new_above) {
 		/* unhook */
@@ -509,13 +491,11 @@ configure_window(XConfigureEvent *ce)
 static void
 circulate_window(XCirculateEvent *ce)
 {
-	Window new_above;
 	struct window *w = find_window(ce->window);
-	if (!w)
-		return;
-	new_above = ce->place == PlaceOnTop ? window_list->id : None;
-	restack_window(w, new_above);
-	clip_changed = 1;
+	if (w) {
+		restack_window(w, ce->place == PlaceOnTop ? window_list->id : None);
+		clip_changed = 1;
+	}
 }
 
 static void
@@ -573,10 +553,8 @@ shape_window(XShapeEvent *se)
 {
 	XserverRegion region0, region1;
 	struct window *w = find_window(se->window);
-
 	if (!w)
 		return;
-
 	if (se->kind == ShapeClip || se->kind == ShapeBounding) {
 		clip_changed = 1;
 
@@ -625,14 +603,11 @@ error(Display *display, XErrorEvent *ev)
 		case BadGlyphSet:   name = "BadGlyphSet";   break;
 		case BadGlyph:      name = "BadGlyph";      break;
 		default:
+			buffer[0] = '\0';
+			XGetErrorText(display, ev->error_code, buffer, sizeof(buffer));
+			name = buffer;
 			break;
 		}
-	}
-
-	if (!name) {
-		buffer[0] = '\0';
-		XGetErrorText(display, ev->error_code, buffer, sizeof(buffer));
-		name = buffer;
 	}
 
 	fprintf(stderr, "error %i: %s request %i minor %i serial %lu\n",
@@ -654,8 +629,8 @@ register_composite_manager(void)
 
 	sprintf(net_wm_cm, "_NET_WM_CM_S%i", screen);
 	a = XInternAtom(dpy, net_wm_cm, 0);
-
 	w = XGetSelectionOwner(dpy, a);
+
 	if (w != None) {
 		winNameAtom = XInternAtom(dpy, "_NET_WM_NAME", 0);
 		if (!XGetTextProperty(dpy, w, &tp, winNameAtom) &&
@@ -670,7 +645,7 @@ register_composite_manager(void)
 		exit(1);
 	}
 
-	w = XCreateSimpleWindow(dpy, RootWindow(dpy, screen), 0, 0, 1, 1, 0, None, None);
+	w = XCreateSimpleWindow(dpy, root, 0, 0, 1, 1, 0, None, None);
 	Xutf8SetWMProperties(dpy, w, "xcman", "xcman", NULL, 0, NULL, NULL, NULL);
 	XSetSelectionOwner(dpy, a, w, 0);
 }
@@ -712,13 +687,17 @@ main(int argc, char **argv)
 		eprintf("no XShape extension\n");
 
 	register_composite_manager();
-	opacity_atom = XInternAtom(dpy, "_NET_WM_WINDOW_OPACITY", 0);
+	opacity_atom      = XInternAtom(dpy, "_NET_WM_WINDOW_OPACITY", 0);
+	background_atom1  = XInternAtom(dpy, "_XROOTPMAP_ID", 0);
+	background_atom2  = XInternAtom(dpy, "_XSETROOT_ID", 0);
+	pixmap_atom       = XInternAtom(dpy, "PIXMAP", 0);
 	pa.subwindow_mode = IncludeInferiors;
-	root_width = DisplayWidth(dpy, screen);
-	root_height = DisplayHeight(dpy, screen);
-	root_picture = XRenderCreatePicture(dpy, root, XRenderFindVisualFormat(dpy, DefaultVisual(dpy, screen)), CPSubwindowMode, &pa);
-	all_damage = None;
-	clip_changed = 1;
+	root_width        = DisplayWidth(dpy, screen);
+	root_height       = DisplayHeight(dpy, screen);
+	visual_format     = XRenderFindVisualFormat(dpy, DefaultVisual(dpy, screen));
+	root_picture      = XRenderCreatePicture(dpy, root, visual_format, CPSubwindowMode, &pa);
+	all_damage        = None;
+	clip_changed      = 1;
 	XGrabServer(dpy);
 	XCompositeRedirectSubwindows(dpy, root, CompositeRedirectManual);
 	XSelectInput(dpy, root, SubstructureNotifyMask | ExposureMask | StructureNotifyMask | PropertyChangeMask);
@@ -764,15 +743,11 @@ main(int argc, char **argv)
 			if (ev.xproperty.atom == opacity_atom) {
 				if ((w = find_window(ev.xproperty.window)))
 					determine_mode(w);
-			} else if (root_tile) {
-				for (i = 0; background_properties[i]; i++) {
-					if (ev.xproperty.atom == XInternAtom(dpy, background_properties[i], 0)) {
-						XClearArea(dpy, root, 0, 0, 0, 0, 1);
-						XRenderFreePicture(dpy, root_tile);
-						root_tile = None;
-						break;
-					}
-				}
+			} else if (root_tile && (ev.xproperty.atom == background_atom1 ||
+						 ev.xproperty.atom == background_atom2)) {
+				XClearArea(dpy, root, 0, 0, 0, 0, 1);
+				XRenderFreePicture(dpy, root_tile);
+				root_tile = None;
 			}
 			break;
 		default:
