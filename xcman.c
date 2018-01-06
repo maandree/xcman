@@ -75,20 +75,15 @@ solid_picture(double a)
 	Pixmap pixmap;
 	Picture picture;
 	XRenderPictureAttributes pa;
-
 	pixmap = XCreatePixmap(dpy, root, 1, 1, 8);
 	if (!pixmap)
 		return None;
-
 	pa.repeat = 1;
 	picture = XRenderCreatePicture(dpy, pixmap, XRenderFindStandardFormat(dpy, PictStandardA8), CPRepeat, &pa);
-	if (!picture) {
-		XFreePixmap(dpy, pixmap);
-		return None;
+	if (picture) {
+		alpha_colour.alpha = a * 0xFFFF;
+		XRenderFillRectangle(dpy, PictOpSrc, picture, &alpha_colour, 0, 0, 1, 1);
 	}
-
-	alpha_colour.alpha = a * 0xFFFF;
-	XRenderFillRectangle(dpy, PictOpSrc, picture, &alpha_colour, 0, 0, 1, 1);
 	XFreePixmap(dpy, pixmap);
 	return picture;
 }
@@ -302,7 +297,7 @@ get_opacity_prop(struct window *w, unsigned int def)
 	int format;
 	unsigned long int n, left;
 	unsigned char *data;
-	int err = XGetWindowProperty(dpy, w->id, opacity_atom, 0L, 1L, 0, XA_CARDINAL, &actual, &format, &n, &left, &data);
+	int err = XGetWindowProperty(dpy, w->id, opacity_atom, 0, 1, 0, XA_CARDINAL, &actual, &format, &n, &left, &data);
 	if (!err && data) {
 		i = *(uint32_t *)data;
 		XFree(data);
@@ -566,7 +561,7 @@ error(Display *display, XErrorEvent *ev)
 	}
 
 	fprintf(stderr, "error %i: %s request %i minor %i serial %lu\n",
-		ev->error_code, (strlen(name) > 0) ? name : "unknown",
+		ev->error_code, *name ? name : "unknown",
 		ev->request_code, ev->minor_code, ev->serial);
 
 	return 0;
@@ -581,12 +576,10 @@ register_composite_manager(void)
 	XTextProperty tp;
 	char **strs;
 	int count;
-
 	sprintf(net_wm_cm, "_NET_WM_CM_S%i", screen);
 	a = XInternAtom(dpy, net_wm_cm, 0);
 	w = XGetSelectionOwner(dpy, a);
-
-	if (w != None) {
+	if (w) {
 		winNameAtom = XInternAtom(dpy, "_NET_WM_NAME", 0);
 		if (!XGetTextProperty(dpy, w, &tp, winNameAtom) &&
 		    !XGetTextProperty(dpy, w, &tp, XA_WM_NAME)) {
@@ -599,7 +592,6 @@ register_composite_manager(void)
 		XFree(tp.value);
 		exit(1);
 	}
-
 	w = XCreateSimpleWindow(dpy, root, 0, 0, 1, 1, 0, None, None);
 	Xutf8SetWMProperties(dpy, w, "xcman", "xcman", NULL, 0, NULL, NULL, NULL);
 	XSetSelectionOwner(dpy, a, w, 0);
