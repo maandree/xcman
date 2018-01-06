@@ -8,7 +8,6 @@
 #include <X11/extensions/Xcomposite.h>
 #include <X11/extensions/Xdamage.h>
 #include <X11/extensions/Xrender.h>
-#include <X11/extensions/shape.h>
 
 #define eprintf(...) (fprintf(stderr, __VA_ARGS__), exit(1))
 #define erealloc(P, N) ((tmp_ = realloc((P), (N))) ? tmp_ : (eprintf("realloc: out of memory\n"), NULL))
@@ -36,8 +35,6 @@ struct window {
 	XserverRegion border_size;
 	XserverRegion extents;
 	uint32_t opacity;
-	int shaped;
-	XRectangle shape_bounds;
 
 	/* for drawing translucent windows */
 	XserverRegion border_clip;
@@ -52,7 +49,7 @@ static Window root;
 static XRenderPictFormat *visual_format;
 static int root_height, root_width;
 static int damage_error, xfixes_error, render_error;
-static int damage_event, xshape_event;
+static int damage_event;
 static int composite_opcode;
 static Atom opacity_atom, background_atom1, background_atom2, pixmap_atom;
 static Atom *background_atoms[] = {&background_atom1, &background_atom2};
@@ -401,11 +398,8 @@ add_window(Window id)
 		free(w);
 		return;
 	}
-	COPY_AREA(&w->shape_bounds, &w->a);
-	if (w->a.class != InputOnly) {
+	if (w->a.class != InputOnly)
 		w->damage = XDamageCreate(dpy, id, XDamageReportNonEmpty);
-		XShapeSelectInput(dpy, id, ShapeNotifyMask);
-	}
 	w->opacity = OPAQUE;
 	w->next = window_list;
 	window_list = w;
@@ -466,8 +460,6 @@ configure_window(XConfigureEvent *ce)
 			}
 		}
 	}
-	w->shape_bounds.x -= w->a.x;
-	w->shape_bounds.y -= w->a.y;
 	COPY_AREA(&w->a, ce);
 	w->a.border_width = ce->border_width;
 	w->a.override_redirect = ce->override_redirect;
@@ -477,12 +469,6 @@ configure_window(XConfigureEvent *ce)
 		XFixesUnionRegion(dpy, damage, damage, extents);
 		XFixesDestroyRegion(dpy, extents);
 		add_damage(damage);
-	}
-	w->shape_bounds.x += w->a.x;
-	w->shape_bounds.y += w->a.y;
-	if (!w->shaped) {
-		w->shape_bounds.width = w->a.width;
-		w->shape_bounds.height = w->a.height;
 	}
 
 	clip_changed = 1;
@@ -546,37 +532,6 @@ damage_window(XDamageNotifyEvent *de)
 	}
 	add_damage(parts);
 	w->damaged = 1;
-}
-
-static void
-shape_window(XShapeEvent *se)
-{
-	XserverRegion region0, region1;
-	struct window *w = find_window(se->window);
-	if (!w)
-		return;
-	if (se->kind == ShapeClip || se->kind == ShapeBounding) {
-		clip_changed = 1;
-
-		region0 = XFixesCreateRegion(dpy, &w->shape_bounds, 1);
-
-		if (se->shaped) {
-			w->shaped = 1;
-			COPY_AREA(&w->shape_bounds, se);
-			w->shape_bounds.x += w->a.x;
-			w->shape_bounds.y += w->a.y;
-		} else {
-			w->shaped = 0;
-			COPY_AREA(&w->shape_bounds, &w->a);
-		}
-
-		region1 = XFixesCreateRegion(dpy, &w->shape_bounds, 1);
-		XFixesUnionRegion(dpy, region0, region0, region1); 
-		XFixesDestroyRegion(dpy, region1);
-
-		/* ask for repaint of the old and new region */
-		paint_all(region0);
-	}
 }
 
 static int
@@ -683,8 +638,6 @@ main(int argc, char **argv)
 		eprintf("no damage extension\n");
 	if (!XFixesQueryExtension(dpy, &(int){0}, &xfixes_error))
 		eprintf("no XFixes extension\n");
-	if (!XShapeQueryExtension(dpy, &xshape_event, &(int){0}))
-		eprintf("no XShape extension\n");
 
 	register_composite_manager();
 	opacity_atom      = XInternAtom(dpy, "_NET_WM_WINDOW_OPACITY", 0);
@@ -701,7 +654,6 @@ main(int argc, char **argv)
 	XGrabServer(dpy);
 	XCompositeRedirectSubwindows(dpy, root, CompositeRedirectManual);
 	XSelectInput(dpy, root, SubstructureNotifyMask | ExposureMask | StructureNotifyMask | PropertyChangeMask);
-	XShapeSelectInput(dpy, root, ShapeNotifyMask);
 	XQueryTree(dpy, root, &root_return, &parent_return, &children, &n);
 	for (i = 0; i < n; i++)
 		add_window(children[i]);
@@ -753,8 +705,6 @@ main(int argc, char **argv)
 		default:
 			if (ev.type == damage_event + XDamageNotify)
 				damage_window((XDamageNotifyEvent *)&ev);
-			else if (ev.type == xshape_event + ShapeNotify)
-				shape_window((XShapeEvent *)&ev);
 			break;
 		}
 		if (!QLength(dpy) && all_damage) {
