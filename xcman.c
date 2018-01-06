@@ -51,8 +51,7 @@ static int root_height, root_width;
 static int damage_error, xfixes_error, render_error;
 static int damage_event;
 static int composite_opcode;
-static Atom opacity_atom, background_atom1, background_atom2, pixmap_atom;
-static Atom *background_atoms[] = {&background_atom1, &background_atom2};
+static Atom opacity_atom, background_atoms[2], pixmap_atom;
 static XRenderColor alpha_colour = {.red = 0, .green = 0, .blue = 0};
 
 static struct window *window_list;
@@ -132,7 +131,7 @@ make_root_tile(void)
 	XRenderPictureAttributes pa = {.repeat = 1};
 
 	for (i = 0; i < 2; i++) {
-		if (!XGetWindowProperty(dpy, root, *(background_atoms[i]), 0, 4, 0, AnyPropertyType,
+		if (!XGetWindowProperty(dpy, root, background_atoms[i], 0, 4, 0, AnyPropertyType,
 				        &actual_type, &actual_format, &nitems, &bytes_after, &prop) &&
 		    actual_type == pixmap_atom && actual_format == 32 && nitems == 1) {
 			memcpy(&pixmap, prop, 4);
@@ -629,17 +628,17 @@ main(int argc, char **argv)
 		eprintf("no XFixes extension\n");
 
 	register_composite_manager();
-	opacity_atom      = XInternAtom(dpy, "_NET_WM_WINDOW_OPACITY", 0);
-	background_atom1  = XInternAtom(dpy, "_XROOTPMAP_ID", 0);
-	background_atom2  = XInternAtom(dpy, "_XSETROOT_ID", 0);
-	pixmap_atom       = XInternAtom(dpy, "PIXMAP", 0);
-	pa.subwindow_mode = IncludeInferiors;
-	root_width        = DisplayWidth(dpy, screen);
-	root_height       = DisplayHeight(dpy, screen);
-	visual_format     = XRenderFindVisualFormat(dpy, DefaultVisual(dpy, screen));
-	root_picture      = XRenderCreatePicture(dpy, root, visual_format, CPSubwindowMode, &pa);
-	all_damage        = None;
-	clip_changed      = 1;
+	opacity_atom        = XInternAtom(dpy, "_NET_WM_WINDOW_OPACITY", 0);
+	background_atoms[0] = XInternAtom(dpy, "_XROOTPMAP_ID", 0);
+	background_atoms[1] = XInternAtom(dpy, "_XSETROOT_ID", 0);
+	pixmap_atom         = XInternAtom(dpy, "PIXMAP", 0);
+	pa.subwindow_mode   = IncludeInferiors;
+	root_width          = DisplayWidth(dpy, screen);
+	root_height         = DisplayHeight(dpy, screen);
+	visual_format       = XRenderFindVisualFormat(dpy, DefaultVisual(dpy, screen));
+	root_picture        = XRenderCreatePicture(dpy, root, visual_format, CPSubwindowMode, &pa);
+	all_damage          = None;
+	clip_changed        = 1;
 	XGrabServer(dpy);
 	XCompositeRedirectSubwindows(dpy, root, CompositeRedirectManual);
 	XSelectInput(dpy, root, SubstructureNotifyMask | ExposureMask | StructureNotifyMask | PropertyChangeMask);
@@ -684,8 +683,8 @@ main(int argc, char **argv)
 			if (ev.xproperty.atom == opacity_atom) {
 				if ((w = find_window(ev.xproperty.window)))
 					determine_mode(w);
-			} else if (root_tile && (ev.xproperty.atom == background_atom1 ||
-						 ev.xproperty.atom == background_atom2)) {
+			} else if (root_tile && (ev.xproperty.atom == background_atoms[0] ||
+						 ev.xproperty.atom == background_atoms[1])) {
 				XClearArea(dpy, root, 0, 0, 0, 0, 1);
 				XRenderFreePicture(dpy, root_tile);
 				root_tile = None;
