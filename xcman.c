@@ -655,12 +655,12 @@ main(int argc, char **argv)
 		if ((ev.type & 0x7F) != KeymapNotify)
 			discard_ignore(ev.xany.serial);
 		switch (ev.type) {
-		case CreateNotify:    add_window(ev.xcreatewindow.window);         break;
-		case ConfigureNotify: configure_window(&ev.xconfigure);            break;
-		case DestroyNotify:   destroy_window(ev.xdestroywindow.window, 1); break;
-		case CirculateNotify: circulate_window(&ev.xcirculate);            break;
-		case MapNotify:       map_window(ev.xmap.window);                  break;
-		case UnmapNotify:     unmap_window(ev.xunmap.window);              break;
+		case CreateNotify:          add_window(ev.xcreatewindow.window);     break;
+		case ConfigureNotify: configure_window(&ev.xconfigure);              break;
+		case DestroyNotify:     destroy_window(ev.xdestroywindow.window, 1); break;
+		case CirculateNotify: circulate_window(&ev.xcirculate);              break;
+		case MapNotify:             map_window(ev.xmap.window);              break;
+		case UnmapNotify:         unmap_window(ev.xunmap.window);            break;
 		case ReparentNotify:
 			if (ev.xreparent.parent == root)
 				add_window(ev.xreparent.window);
