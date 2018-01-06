@@ -124,14 +124,13 @@ find_window(Window id)
 static Picture
 make_root_tile(void)
 {
-	Picture picture, pixmap;
+	Picture picture, pixmap = None;
 	Atom actual_type;
 	int i, actual_format, fill;
 	unsigned long int nitems, bytes_after;
 	unsigned char *prop;
-	XRenderPictureAttributes pa;
+	XRenderPictureAttributes pa = {.repeat = 1};
 
-	pixmap = None;
 	for (i = 0; i < 2; i++) {
 		if (!XGetWindowProperty(dpy, root, *(background_atoms[i]), 0, 4, 0, AnyPropertyType,
 				        &actual_type, &actual_format, &nitems, &bytes_after, &prop) &&
@@ -146,7 +145,6 @@ make_root_tile(void)
 		pixmap = XCreatePixmap(dpy, root, 1, 1, DefaultDepth(dpy, screen));
 		fill = 1;
 	}
-	pa.repeat = 1;
 	picture = XRenderCreatePicture(dpy, pixmap, visual_format, CPRepeat, &pa);
 	if (fill) {
 		alpha_colour.alpha = 0xFFFF;
@@ -298,12 +296,11 @@ get_opacity_prop(struct window *w, unsigned int def)
 	unsigned long int n, left;
 	unsigned char *data;
 	int err = XGetWindowProperty(dpy, w->id, opacity_atom, 0, 1, 0, XA_CARDINAL, &actual, &format, &n, &left, &data);
-	if (!err && data) {
-		i = *(uint32_t *)data;
-		XFree(data);
-		return i;
-	}
-	return def;
+	if (err || !data)
+		return def;
+	i = *(uint32_t *)data;
+	XFree(data);
+	return i;
 }
 
 static void
@@ -333,7 +330,7 @@ map_window(Window id)
 	if (!w)
 		return;
 	w->a.map_state = IsViewable;
-	XSelectInput(dpy, id, PropertyChangeMask); /* This needs to be here or else we lose transparency messages */
+	XSelectInput(dpy, id, PropertyChangeMask); /* subscribe to transparency changes */
 	determine_mode(w); /* This needs to be here since we don't get PropertyNotify when unmapped */
 	w->damaged = 0;
 }
@@ -605,7 +602,7 @@ main(int argc, char **argv)
 	XRenderPictureAttributes pa;
 	XRectangle *expose_rects = NULL;
 	size_t n_expose = 0, size_expose = 0;
-	unsigned int i, n;
+	unsigned int n;
 	int more, composite_major, composite_minor;
 	struct window *w;
 
@@ -647,8 +644,8 @@ main(int argc, char **argv)
 	XCompositeRedirectSubwindows(dpy, root, CompositeRedirectManual);
 	XSelectInput(dpy, root, SubstructureNotifyMask | ExposureMask | StructureNotifyMask | PropertyChangeMask);
 	XQueryTree(dpy, root, &root_return, &parent_return, &children, &n);
-	for (i = 0; i < n; i++)
-		add_window(children[i]);
+	while (n--)
+		add_window(children[n]);
 	XFree(children);
 	XUngrabServer(dpy);
 	paint_all(None);
