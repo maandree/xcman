@@ -577,10 +577,8 @@ register_composite_manager(void)
 	w = XGetSelectionOwner(dpy, a);
 	if (w) {
 		winNameAtom = XInternAtom(dpy, "_NET_WM_NAME", 0);
-		if (!XGetTextProperty(dpy, w, &tp, winNameAtom) &&
-		    !XGetTextProperty(dpy, w, &tp, XA_WM_NAME)) {
+		if (!XGetTextProperty(dpy, w, &tp, winNameAtom) && !XGetTextProperty(dpy, w, &tp, XA_WM_NAME))
 			eprintf("another composite manager is already running (0x%lx)\n", (unsigned long int)w);
-		}
 		if (!XmbTextPropertyToTextList(dpy, &tp, &strs, &count)) {
 			fprintf(stderr, "another composite manager is already running (%s)\n", strs[0]);
 			XFreeStringList(strs);
