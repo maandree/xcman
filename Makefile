@@ -29,7 +29,7 @@ uninstall:
 	-rm -rf -- "$(DESTDIR)$(PREFIX)/share/licenses/xcman"
 
 clean:
-	-rm -f -- xcman
+	-rm -f -- xcman *.o *.su
 
 .SUFFIXES:
 .SUFFIXES: .c .o
