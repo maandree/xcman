@@ -3,7 +3,17 @@
 CONFIGFILE = config.mk
 include $(CONFIGFILE)
 
+OBJ = xcman.o
+HDR =
+
 all: xcman
+$(OBJ): $(HDR)
+
+xcman: $(OBJ)
+	$(CC) -o $@ $(OBJ) $(LDFLAGS)
+
+.c.o:
+	$(CC) -c -o $@ $< $(CFLAGS) $(CPPFLAGS)
 
 install: xcman
 	mkdir -p -- "$(DESTDIR)$(PREFIX)/bin"
@@ -22,6 +32,6 @@ clean:
 	-rm -f -- xcman
 
 .SUFFIXES:
-.SUFFIXES: .c
+.SUFFIXES: .c .o
 
 .PHONY: all install uninstall clean
