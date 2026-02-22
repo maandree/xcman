@@ -5,5 +5,5 @@ SYNOPSIS
 	xcman
 
 DESCRIPTION
-	xcman is a minimal compositing manager, for X, forked
-	from xcompmgr. It only provides transparancy support.
+	xcman is a minimal compositing manager for X, forked
+	from xcompmgr. It only provides transparency support.
