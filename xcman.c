@@ -17,10 +17,10 @@ static void *tmp_;
 #define OPAQUE (~(uint32_t)0)
 
 #define COPY_AREA(DEST, SRC)\
-	((DEST)->x = (SRC)->x,\
-	 (DEST)->y = (SRC)->y,\
-	 (DEST)->width = (SRC)->width,\
-	 (DEST)->height = (SRC)->height)
+	((DEST)->x = (short int)(SRC)->x,\
+	 (DEST)->y = (short int)(SRC)->y,\
+	 (DEST)->width = (unsigned short int)(SRC)->width,\
+	 (DEST)->height = (unsigned short int)(SRC)->height)
 
 struct window {
 	struct window *next;
@@ -80,7 +80,8 @@ solid_picture(double a)
 	pa.repeat = 1;
 	picture = XRenderCreatePicture(dpy, pixmap, XRenderFindStandardFormat(dpy, PictStandardA8), CPRepeat, &pa);
 	if (picture) {
-		alpha_colour.alpha = a * 0xFFFF;
+		a *= (double)0xFFFF;
+		alpha_colour.alpha = (unsigned short int)a;
 		XRenderFillRectangle(dpy, PictOpSrc, picture, &alpha_colour, 0, 0, 1, 1);
 	}
 	XFreePixmap(dpy, pixmap);
@@ -99,7 +100,7 @@ static void
 set_ignore(unsigned long int sequence)
 {
 	if (n_ignores == size_ignores)
-		ignores = erealloc(ignores, (size_ignores += 64) * sizeof(*ignores));
+		ignores = erealloc(ignores, (size_ignores += 64U) * sizeof(*ignores));
 	ignores[n_ignores++] = sequence;
 }
 
@@ -110,6 +111,9 @@ should_ignore(unsigned long int sequence)
 	return n_ignores && ignores[0] == sequence;
 }
 
+#if defined(__GNUC__)
+__attribute__((__pure__))
+#endif
 static struct window *
 find_window(Window id)
 {
@@ -141,7 +145,7 @@ make_root_tile(void)
 		}
 	}
 	if (!pixmap) {
-		pixmap = XCreatePixmap(dpy, root, 1, 1, DefaultDepth(dpy, screen));
+		pixmap = XCreatePixmap(dpy, root, 1, 1, (unsigned)DefaultDepth(dpy, screen));
 		fill = 1;
 	}
 	picture = XRenderCreatePicture(dpy, pixmap, visual_format, CPRepeat, &pa);
@@ -157,8 +161,8 @@ window_extents(struct window *w)
 {
 	XRectangle r;
 	COPY_AREA(&r, &w->a);
-	r.width  += w->a.border_width * 2;
-	r.height += w->a.border_width * 2;
+	r.width  += (unsigned short int)(w->a.border_width * 2);
+	r.height += (unsigned short int)(w->a.border_width * 2);
 	return XFixesCreateRegion(dpy, &r, 1);
 }
 
@@ -186,12 +190,12 @@ paint_all(XserverRegion region)
 
 	if (!region) {
 		r.x = r.y = 0;
-		r.width = root_width;
-		r.height = root_height;
+		r.width = (unsigned short int)root_width;
+		r.height = (unsigned short int)root_height;
 		region = XFixesCreateRegion(dpy, &r, 1);
 	}
 	if (!root_buffer) {
-		rootPixmap = XCreatePixmap(dpy, root, root_width, root_height, DefaultDepth(dpy, screen));
+		rootPixmap = XCreatePixmap(dpy, root, (unsigned)root_width, (unsigned)root_height, (unsigned)DefaultDepth(dpy, screen));
 		root_buffer = XRenderCreatePicture(dpy, rootPixmap, visual_format, 0, NULL);
 		XFreePixmap(dpy, rootPixmap);
 	}
@@ -239,7 +243,7 @@ paint_all(XserverRegion region)
 			set_ignore(NextRequest(dpy));
 			XFixesSubtractRegion(dpy, region, region, w->border_size);
 			set_ignore(NextRequest(dpy));
-			XRenderComposite(dpy, PictOpSrc, w->picture, None, root_buffer, 0, 0, 0, 0, x, y, wid, hei);
+			XRenderComposite(dpy, PictOpSrc, w->picture, None, root_buffer, 0, 0, 0, 0, x, y, (unsigned)wid, (unsigned)hei);
 		}
 		if (!w->border_clip) {
 			w->border_clip = XFixesCreateRegion(dpy, NULL, 0);
@@ -252,7 +256,7 @@ paint_all(XserverRegion region)
 	XFixesSetPictureClipRegion(dpy, root_buffer, 0, 0, region);
 	if (!root_tile)
 		root_tile = make_root_tile();
-	XRenderComposite(dpy, PictOpSrc, root_tile, None, root_buffer, 0, 0, 0, 0, 0, 0, root_width, root_height);
+	XRenderComposite(dpy, PictOpSrc, root_tile, None, root_buffer, 0, 0, 0, 0, 0, 0, (unsigned)root_width, (unsigned)root_height);
 	for (w = t; w; w = w->prev_trans) {
 		XFixesSetPictureClipRegion(dpy, root_buffer, 0, 0, w->border_clip);
 		if (w->opacity != OPAQUE && !w->alpha_picture)
@@ -263,7 +267,7 @@ paint_all(XserverRegion region)
 			wid = w->a.width + w->a.border_width * 2;
 			hei = w->a.height + w->a.border_width * 2;
 			set_ignore(NextRequest(dpy));
-			XRenderComposite(dpy, PictOpOver, w->picture, w->alpha_picture, root_buffer, 0, 0, 0, 0, x, y, wid, hei);
+			XRenderComposite(dpy, PictOpOver, w->picture, w->alpha_picture, root_buffer, 0, 0, 0, 0, x, y, (unsigned)wid, (unsigned)hei);
 		}
 		XFixesDestroyRegion(dpy, w->border_clip);
 		w->border_clip = None;
@@ -271,7 +275,7 @@ paint_all(XserverRegion region)
 	XFixesDestroyRegion(dpy, region);
 	if (root_buffer != root_picture) {
 		XFixesSetPictureClipRegion(dpy, root_buffer, 0, 0, None);
-		XRenderComposite(dpy, PictOpSrc, root_buffer, None, root_picture, 0, 0, 0, 0, 0, 0, root_width, root_height);
+		XRenderComposite(dpy, PictOpSrc, root_buffer, None, root_picture, 0, 0, 0, 0, 0, 0, (unsigned)root_width, (unsigned)root_height);
 	}
 }
 
@@ -668,11 +672,11 @@ main(int argc, char **argv)
 			if (ev.xexpose.window == root) {
 				more = ev.xexpose.count + 1;
 				if (n_expose == size_expose)
-					expose_rects = erealloc(expose_rects, (size_expose += more) * sizeof(XRectangle));
+					expose_rects = erealloc(expose_rects, (size_expose += (size_t)more) * sizeof(XRectangle));
 				COPY_AREA(&expose_rects[n_expose], &ev.xexpose);
 				n_expose++;
 				if (!ev.xexpose.count) {
-					add_damage(XFixesCreateRegion(dpy, expose_rects, n_expose));
+					add_damage(XFixesCreateRegion(dpy, expose_rects, (int)n_expose));
 					n_expose = 0;
 				}
 			}
